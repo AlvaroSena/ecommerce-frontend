@@ -6,30 +6,28 @@ interface AuthContextProviderProps {
 }
 
 interface AuthContextType {
-  user: { id: string; email: string } | null;
+  user: { id: string } | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  loading: boolean;
 }
 
 export const AuthContext = createContext({} as AuthContextType);
 
 export function AuthContextProvider({ children }: AuthContextProviderProps) {
   const [user, setUser] = useState<AuthContextType["user"]>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setAccessToken] = useState<string | null>(null);
 
-  useEffect(() => {
-    api
-      .get("/auth/me")
-      .then((res) =>
-        setUser({
-          id: "sdadasd",
-          email: res.data.user.email,
-        }),
-      )
-      .catch(() => setUser(null))
-      .finally(() => setLoading(false));
-  }, []);
+  const refresh = async () => {
+    try {
+      const res = await api.post("/auth/refresh");
+      setAccessToken(res.data.accessToken);
+      api.defaults.headers.common["Authorization"] = `Bearer ${res.data.accessToken}`;
+      await fetchMe();
+    } catch {
+      setUser(null);
+      setAccessToken(null);
+    }
+  };
 
   const login = async (email: string, password: string) => {
     if (!email || !password) {
@@ -37,12 +35,12 @@ export function AuthContextProvider({ children }: AuthContextProviderProps) {
     }
 
     try {
-      await api.post("/auth/login", { email, password });
-      const res = await api.get("/auth/me");
-      setUser({
-        id: "sdadasd",
-        email: res.data.user.email,
-      });
+      const response = await api.post("/auth/login", { email, password });
+      const data = response.data;
+      setAccessToken(data.accessToken);
+      api.defaults.headers.common["Authorization"] = `Bearer ${data.accessToken}`;
+
+      await fetchMe();
     } catch (err) {
       console.log(err);
     }
@@ -53,7 +51,20 @@ export function AuthContextProvider({ children }: AuthContextProviderProps) {
     setUser(null);
   };
 
-  return <AuthContext.Provider value={{ login, logout, user, loading }}>{children}</AuthContext.Provider>;
+  const fetchMe = async () => {
+    try {
+      const res = await api.get("/auth/me");
+      setUser({ id: res.data.user });
+    } catch {
+      setUser(null);
+    }
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  return <AuthContext.Provider value={{ login, logout, user }}>{children}</AuthContext.Provider>;
 }
 
 export const useAuth = () => {
